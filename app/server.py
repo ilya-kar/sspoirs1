@@ -22,18 +22,16 @@ class CommandHandler:
         cmd = parts[0].upper()
         arg = parts[1] if len(parts) > 1 else ""
 
-        result = ""
         if cmd == "DOWNLOAD":
             self.download(sock, arg)
-        elif cmd in self.simple_commands:
+            return
+
+        if cmd in self.simple_commands:
             result = self.simple_commands[cmd](arg)
         else:
-            result = f"Unknown command: {cmd}".encode()
+            result = f"Unknown command: {cmd}"
 
-        if isinstance(result, str):
-            result = result.encode()
-
-        proto.send_data(sock, result)
+        proto.send_data(sock, result.encode())
 
     def echo(self, arg: str) -> str:
         return arg
