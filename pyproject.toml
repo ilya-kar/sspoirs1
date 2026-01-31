@@ -1,0 +1,37 @@
+[project]
+name = "app"
+version = "0.1"
+requires-python = ">=3.13"
+
+authors = [
+    { name = "dispronesson", email = "dispronesson@mail.ru" },
+]
+
+dependencies = [
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.14",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+indent-width = 4
+
+exclude = [
+    ".venv/",
+]
+
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+]
+
+ignore = [
+    "E203",
+    "E501",
+]
