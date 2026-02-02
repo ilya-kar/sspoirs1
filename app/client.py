@@ -3,6 +3,11 @@ import struct
 import sys
 
 import app.protocol as proto
+from app.protocol import Command
+
+
+class ExitException(Exception):
+    pass
 
 
 class Client:
@@ -19,36 +24,43 @@ class Client:
                 if not message:
                     continue
                 proto.send_data(sock, message.encode())
-                self.handle_cmd(sock, message)
-                if message.strip().upper() == "EXIT":
-                    break
+                self.handle_command(sock, message)
         except (ConnectionError, BrokenPipeError) as e:
             print(f"Error: {e}")
+        except ExitException:
+            pass
         finally:
             sock.close()
 
-    def handle_cmd(self, sock: socket.socket, message: str):
+    def handle_command(self, sock: socket.socket, message: str):
         parts = message.strip().split(maxsplit=1)
         cmd = parts[0].upper()
         arg = parts[1] if len(parts) > 1 else ""
 
-        if cmd == "DOWNLOAD":
+        try:
+            cmd = Command(cmd)
+        except ValueError:
+            pass
+
+        if cmd is Command.DOWNLOAD:
             self.download(sock, arg.replace("\\", "/").split("/")[-1])
+        elif cmd is Command.EXIT:
+            raise ExitException
         else:
             response = proto.recv_data(sock).decode()
             print(response)
 
     def download(self, sock: socket.socket, filename: str):
-        status = proto.recv_data(sock)
+        data = proto.recv_data(sock)
+        status = data[0]
+        msg = data[1:]
 
-        if status == b"ERR":
-            msg = proto.recv_data(sock).decode()
-            print("Error:", msg)
+        if status == proto.STATUS_ERR:
+            print(msg.decode())
             return
 
-        if status == b"OK":
-            size_bytes = proto.recv_data(sock)
-            file_size = struct.unpack("!Q", size_bytes)[0]
+        if status == proto.STATUS_OK:
+            file_size = struct.unpack("!Q", msg)[0]
 
             print("Downloading...")
 

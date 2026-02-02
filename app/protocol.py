@@ -1,5 +1,17 @@
+import enum
 import socket
 import struct
+
+STATUS_OK = 0
+STATUS_ERR = 1
+
+
+class Command(str, enum.Enum):
+    ECHO = "ECHO"
+    TIME = "TIME"
+    EXIT = "EXIT"
+    DOWNLOAD = "DOWNLOAD"
+    UPLOAD = "UPLOAD"
 
 
 def recv_exact(sock: socket.socket, size: int) -> bytes:

@@ -5,66 +5,15 @@ import struct
 import sys
 
 import app.protocol as proto
+from app.protocol import Command
 
-BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "files")
+BASE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "server_files"
+)
 os.makedirs(BASE_DIR, exist_ok=True)
 
 PORT = 8080
 BACKLOG = 1
-
-
-class CommandHandler:
-    def __init__(self):
-        self.simple_commands = {"ECHO": self.echo, "TIME": self.time, "EXIT": self.exit}
-
-    def handle(self, sock: socket.socket, message: str):
-        parts = message.strip().split(maxsplit=1)
-        cmd = parts[0].upper()
-        arg = parts[1] if len(parts) > 1 else ""
-
-        if cmd == "DOWNLOAD":
-            self.download(sock, arg)
-            return
-
-        if cmd in self.simple_commands:
-            result = self.simple_commands[cmd](arg)
-        else:
-            result = f"Unknown command: {cmd}"
-
-        proto.send_data(sock, result.encode())
-
-    def echo(self, arg: str) -> str:
-        return arg
-
-    def time(self, _) -> str:
-        return datetime.datetime.now().strftime("%H:%M:%S")
-
-    def exit(self, _) -> str:
-        return "Bye!"
-
-    def download(self, sock: socket.socket, filename: str):
-        safe_name = os.path.normpath(filename).replace("\\", "/")
-        file_path = os.path.join(BASE_DIR, safe_name)
-        real_path = os.path.realpath(file_path)
-
-        if not real_path.startswith(os.path.realpath(BASE_DIR)):
-            proto.send_data(sock, b"ERR")
-            proto.send_data(sock, b"Access denied.")
-            return
-
-        if not os.path.isfile(real_path):
-            proto.send_data(sock, b"ERR")
-            proto.send_data(sock, f"File '{filename}' not found.".encode())
-            return
-
-        proto.send_data(sock, b"OK")
-
-        file_size = os.path.getsize(real_path)
-        proto.send_data(sock, struct.pack("!Q", file_size))
-
-        with open(real_path, "rb") as f:
-            while chunk := f.read(4096):
-                proto.send_data(sock, chunk)
 
 
 class Server:
@@ -75,7 +24,8 @@ class Server:
         try:
             while True:
                 conn, addr = sock.accept()
-                print(f"Client {addr[0]}:{addr[1]} connected")
+                ip, port = addr
+                print(f"Client {ip}:{port} connected")
 
                 try:
                     self.handle_client(conn)
@@ -83,7 +33,7 @@ class Server:
                     pass
                 finally:
                     conn.close()
-                    print(f"Client {addr[0]}:{addr[1]} disconnected")
+                    print(f"Client {ip}:{port} disconnected")
         finally:
             sock.close()
 
@@ -95,10 +45,54 @@ class Server:
         return sock
 
     def handle_client(self, conn: socket.socket):
-        handler = CommandHandler()
         while True:
             message = proto.recv_data(conn).decode()
-            handler.handle(conn, message)
+            self.handle_command(conn, message)
+
+    def handle_command(self, conn: socket.socket, message: str):
+        parts = message.strip().split(maxsplit=1)
+        cmd = parts[0].upper()
+        arg = parts[1] if len(parts) > 1 else ""
+
+        try:
+            cmd = Command(cmd)
+        except ValueError:
+            proto.send_data(conn, f"ERR: Unknown command: {cmd}".encode())
+
+        if cmd is Command.ECHO:
+            proto.send_data(conn, arg.encode())
+        elif cmd is Command.TIME:
+            time = datetime.datetime.now().strftime("%H:%M:%S")
+            proto.send_data(conn, time.encode())
+        elif cmd is Command.EXIT:
+            proto.send_data(conn, b"Bye!")
+        elif cmd is Command.DOWNLOAD:
+            self.download(conn, arg)
+
+    def download(self, sock: socket.socket, filename: str):
+        safe_name = os.path.normpath(filename).replace("\\", "/")
+        file_path = os.path.join(BASE_DIR, safe_name)
+        real_path = os.path.realpath(file_path)
+
+        if not real_path.startswith(os.path.realpath(BASE_DIR)):
+            msg = bytes([proto.STATUS_ERR]) + b"ERR: Access denied"
+            proto.send_data(sock, msg)
+            return
+
+        if not os.path.isfile(real_path):
+            msg = (
+                bytes([proto.STATUS_ERR]) + f"ERR: File '{filename}' not found".encode()
+            )
+            proto.send_data(sock, msg)
+            return
+
+        file_size = os.path.getsize(real_path)
+        msg = bytes([proto.STATUS_OK]) + struct.pack("!Q", file_size)
+        proto.send_data(sock, msg)
+
+        with open(real_path, "rb") as f:
+            while chunk := f.read(4096):
+                proto.send_data(sock, chunk)
 
 
 if __name__ == "__main__":
