@@ -1,9 +1,15 @@
+import os
 import socket
 import struct
 import sys
 
 import app.protocol as proto
 from app.protocol import Command
+
+BASE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "client_files"
+)
+os.makedirs(BASE_DIR, exist_ok=True)
 
 
 class ExitException(Exception):
@@ -23,7 +29,6 @@ class Client:
                 message = input("> ")
                 if not message:
                     continue
-                proto.send_data(sock, message.encode())
                 self.handle_command(sock, message)
         except (ConnectionError, BrokenPipeError) as e:
             print(f"Error: {e}")
@@ -40,17 +45,28 @@ class Client:
         try:
             cmd = Command(cmd)
         except ValueError:
-            pass
+            print(f"ERR: Unknown command: {cmd}")
+            return
+
+        if cmd is Command.UPLOAD:
+            self.upload(sock, arg)
+            return
+
+        proto.send_data(sock, message.encode())
 
         if cmd is Command.DOWNLOAD:
-            self.download(sock, arg.replace("\\", "/").split("/")[-1])
-        elif cmd is Command.EXIT:
-            raise ExitException
+            self.download(sock, arg)
         else:
             response = proto.recv_data(sock).decode()
             print(response)
 
-    def download(self, sock: socket.socket, filename: str):
+        if cmd is Command.EXIT:
+            raise ExitException
+
+    def download(self, sock: socket.socket, arg: str):
+        filename = arg.replace("\\", "/").split("/")[-1]
+        file_path = os.path.join(BASE_DIR, filename)
+
         data = proto.recv_data(sock)
         status = data[0]
         msg = data[1:]
@@ -64,7 +80,7 @@ class Client:
 
             print("Downloading...")
 
-            with open(filename, "wb") as f:
+            with open(file_path, "wb") as f:
                 received = 0
                 while received < file_size:
                     chunk = proto.recv_data(sock)
@@ -72,6 +88,26 @@ class Client:
                     received += len(chunk)
 
             print("Done")
+
+    def upload(self, sock: socket.socket, arg: str):
+        real_path = os.path.realpath(arg)
+
+        if not os.path.isfile(real_path):
+            print(f"ERR: File '{arg}' not found")
+            return
+
+        proto.send_data(sock, f"UPLOAD {arg}".encode())
+
+        file_size = os.path.getsize(real_path)
+        proto.send_data(sock, struct.pack("!Q", file_size))
+
+        print("Uploading...")
+
+        with open(real_path, "rb") as f:
+            while chunk := f.read(4096):
+                proto.send_data(sock, chunk)
+
+        print("Done")
 
 
 if __name__ == "__main__":

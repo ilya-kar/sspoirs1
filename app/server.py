@@ -68,10 +68,11 @@ class Server:
             proto.send_data(conn, b"Bye!")
         elif cmd is Command.DOWNLOAD:
             self.download(conn, arg)
+        elif cmd is Command.UPLOAD:
+            self.upload(conn, arg)
 
-    def download(self, sock: socket.socket, filename: str):
-        safe_name = os.path.normpath(filename).replace("\\", "/")
-        file_path = os.path.join(BASE_DIR, safe_name)
+    def download(self, sock: socket.socket, arg: str):
+        file_path = os.path.join(BASE_DIR, arg)
         real_path = os.path.realpath(file_path)
 
         if not real_path.startswith(os.path.realpath(BASE_DIR)):
@@ -80,9 +81,7 @@ class Server:
             return
 
         if not os.path.isfile(real_path):
-            msg = (
-                bytes([proto.STATUS_ERR]) + f"ERR: File '{filename}' not found".encode()
-            )
+            msg = bytes([proto.STATUS_ERR]) + f"ERR: File '{arg}' not found".encode()
             proto.send_data(sock, msg)
             return
 
@@ -93,6 +92,20 @@ class Server:
         with open(real_path, "rb") as f:
             while chunk := f.read(4096):
                 proto.send_data(sock, chunk)
+
+    def upload(self, sock: socket.socket, arg: str):
+        filename = arg.replace("\\", "/").split("/")[-1]
+        file_path = os.path.join(BASE_DIR, filename)
+
+        raw_file_size = proto.recv_data(sock)
+        file_size = struct.unpack("!Q", raw_file_size)[0]
+
+        with open(file_path, "wb") as f:
+            received = 0
+            while received < file_size:
+                chunk = proto.recv_data(sock)
+                f.write(chunk)
+                received += len(chunk)
 
 
 if __name__ == "__main__":
