@@ -2,42 +2,56 @@ import os
 import socket
 import struct
 import sys
+import time
 
 import app.protocol as proto
 from app.protocol import Command
 
-BASE_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "client_files"
-)
-os.makedirs(BASE_DIR, exist_ok=True)
-
-
-class ExitException(Exception):
-    pass
-
 
 class Client:
-    def start(self, ip: str, port: int):
+    def __init__(self, ip: str, port: int):
+        self.ip = ip
+        self.port = port
+
+    def new_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(30)
-        sock.connect((ip, port))
-        self.handle_input(sock)
+        return sock
 
-    def handle_input(self, sock: socket.socket):
-        try:
-            while True:
-                message = input("> ")
-                if not message:
-                    continue
-                self.handle_command(sock, message)
-        except (ConnectionError, BrokenPipeError) as e:
-            print(f"Error: {e}")
-        except ExitException:
-            pass
-        finally:
-            sock.close()
+    def connect(self):
+        self.sock = self.new_socket()
+        self.sock.connect((self.ip, self.port))
 
-    def handle_command(self, sock: socket.socket, message: str):
+    def start(self):
+        while True:
+            try:
+                self.connect()
+                print("Connected to the server")
+                self.handle_input()
+            except (KeyboardInterrupt, proto.ExitException):
+                print("\nExiting...")
+                break
+            except ConnectionRefusedError:
+                print("Server unavailable")
+                break
+            except (proto.PeerDisconnected, BrokenPipeError, TimeoutError) as e:
+                print("Connection with the server was lost")
+                print(f"Details: {e}")
+                answer = input("Try to reconnect? [y/n]: ").strip().lower()
+                if answer != "y":
+                    break
+                print("Reconnecting...")
+            finally:
+                self.sock.close()
+
+    def handle_input(self):
+        while True:
+            message = input("> ")
+            if not message:
+                continue
+            self.handle_command(message)
+
+    def handle_command(self, message: str):
         parts = message.strip().split(maxsplit=1)
         cmd = parts[0].upper()
         arg = parts[1] if len(parts) > 1 else ""
@@ -45,29 +59,27 @@ class Client:
         try:
             cmd = Command(cmd)
         except ValueError:
-            print(f"ERR: Unknown command: {cmd}")
-            return
+            cmd = None
 
         if cmd is Command.UPLOAD:
-            self.upload(sock, arg)
+            self.upload(arg)
             return
 
-        proto.send_data(sock, message.encode())
+        proto.send_data(self.sock, message.encode())
 
         if cmd is Command.DOWNLOAD:
-            self.download(sock, arg)
+            self.download(arg)
         else:
-            response = proto.recv_data(sock).decode()
+            response = proto.recv_data(self.sock).decode()
             print(response)
 
         if cmd is Command.EXIT:
-            raise ExitException
+            raise proto.ExitException
 
-    def download(self, sock: socket.socket, arg: str):
+    def download(self, arg: str):
         filename = arg.replace("\\", "/").split("/")[-1]
-        file_path = os.path.join(BASE_DIR, filename)
 
-        data = proto.recv_data(sock)
+        data = proto.recv_data(self.sock)
         status = data[0]
         msg = data[1:]
 
@@ -75,39 +87,53 @@ class Client:
             print(msg.decode())
             return
 
-        if status == proto.STATUS_OK:
-            file_size = struct.unpack("!Q", msg)[0]
+        file_size = struct.unpack("!Q", msg)[0]
+        print(f"Downloading file '{arg}'...")
 
-            print("Downloading...")
+        start_time = time.time()
+        received = 0
+        next_percent = 1
 
-            with open(file_path, "wb") as f:
-                received = 0
-                while received < file_size:
-                    chunk = proto.recv_data(sock)
-                    f.write(chunk)
-                    received += len(chunk)
+        with open(filename, "wb") as f:
+            while received < file_size:
+                chunk = proto.recv_data(self.sock)
+                f.write(chunk)
+                received += len(chunk)
+                next_percent = proto.print_transfer_status(
+                    received, file_size, next_percent
+                )
 
-            print("Done")
+        print("\nDone")
+        proto.print_data_speed(start_time, received, "Download speed")
 
-    def upload(self, sock: socket.socket, arg: str):
+    def upload(self, arg: str):
         real_path = os.path.realpath(arg)
 
         if not os.path.isfile(real_path):
             print(f"ERR: File '{arg}' not found")
             return
 
-        proto.send_data(sock, f"UPLOAD {arg}".encode())
+        proto.send_data(self.sock, f"UPLOAD {arg}".encode())
 
         file_size = os.path.getsize(real_path)
-        proto.send_data(sock, struct.pack("!Q", file_size))
+        proto.send_data(self.sock, struct.pack("!Q", file_size))
 
-        print("Uploading...")
+        print(f"Uploading file '{arg}'...")
+
+        start_time = time.time()
+        sent = 0
+        next_percent = 1
 
         with open(real_path, "rb") as f:
             while chunk := f.read(4096):
-                proto.send_data(sock, chunk)
+                proto.send_data(self.sock, chunk)
+                sent += len(chunk)
+                next_percent = proto.print_transfer_status(
+                    sent, file_size, next_percent
+                )
 
-        print("Done")
+        print("\nDone")
+        proto.print_data_speed(start_time, sent, "Upload speed")
 
 
 if __name__ == "__main__":
@@ -115,11 +141,10 @@ if __name__ == "__main__":
         print("Usage: python client.py <ip> <port>")
         sys.exit(1)
 
-    client = Client()
     try:
-        client.start(sys.argv[1], int(sys.argv[2]))
-    except KeyboardInterrupt:
-        print("\nExit...")
+        client = Client(sys.argv[1], int(sys.argv[2]))
+        print("Connecting...")
+        client.start()
     except ValueError:
         print("Port must be a number")
     except OSError as e:
