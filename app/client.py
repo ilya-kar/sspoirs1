@@ -16,6 +16,7 @@ class Client:
     def new_socket(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(30)
+        proto.enable_keepalive(sock)
         return sock
 
     def connect(self):
@@ -34,8 +35,8 @@ class Client:
             except ConnectionRefusedError:
                 print("Server unavailable")
                 break
-            except (proto.PeerDisconnected, BrokenPipeError, TimeoutError) as e:
-                print("Connection with the server was lost")
+            except (ConnectionError, TimeoutError) as e:
+                print("\nConnection with the server was lost")
                 print(f"Details: {e}")
                 answer = input("Try to reconnect? [y/n]: ").strip().lower()
                 if answer != "y":
@@ -87,14 +88,25 @@ class Client:
             print(msg.decode())
             return
 
+        client_file_size = 0
+        mode = "wb"
+
+        if status == proto.STATUS_APPEND:
+            try:
+                client_file_size = os.path.getsize(filename)
+                mode = "ab"
+            except FileNotFoundError:
+                pass
+            proto.send_data(self.sock, struct.pack("!Q", client_file_size))
+
         file_size = struct.unpack("!Q", msg)[0]
         print(f"Downloading file '{arg}'...")
 
         start_time = time.time()
-        received = 0
-        next_percent = 1
+        received = client_file_size
+        next_percent = proto.print_transfer_status(received, file_size, 0)
 
-        with open(filename, "wb") as f:
+        with open(filename, mode) as f:
             while received < file_size:
                 chunk = proto.recv_data(self.sock)
                 f.write(chunk)
@@ -104,7 +116,9 @@ class Client:
                 )
 
         print("\nDone")
-        proto.print_data_speed(start_time, received, "Download speed")
+        proto.print_data_speed(
+            start_time, received - client_file_size, "Download speed"
+        )
 
     def upload(self, arg: str):
         real_path = os.path.realpath(arg)
@@ -118,13 +132,22 @@ class Client:
         file_size = os.path.getsize(real_path)
         proto.send_data(self.sock, struct.pack("!Q", file_size))
 
+        data = proto.recv_data(self.sock)
+        status = data[0]
+        msg = data[1:]
+
+        seek = 0
+        if status == proto.STATUS_APPEND:
+            seek = struct.unpack("!Q", msg)[0]
+
         print(f"Uploading file '{arg}'...")
 
         start_time = time.time()
-        sent = 0
-        next_percent = 1
+        sent = seek
+        next_percent = proto.print_transfer_status(sent, file_size, 0)
 
         with open(real_path, "rb") as f:
+            f.seek(sent)
             while chunk := f.read(4096):
                 proto.send_data(self.sock, chunk)
                 sent += len(chunk)
@@ -133,7 +156,7 @@ class Client:
                 )
 
         print("\nDone")
-        proto.print_data_speed(start_time, sent, "Upload speed")
+        proto.print_data_speed(start_time, sent - seek, "Upload speed")
 
 
 if __name__ == "__main__":
