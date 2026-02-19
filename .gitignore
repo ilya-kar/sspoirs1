@@ -4,3 +4,5 @@
 build/
 .ruff_cache/
 .vscode/
+server_files/
+*.bin

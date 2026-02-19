@@ -46,12 +46,24 @@ def send_data(sock: socket.socket, data: bytes):
     sock.sendall(data)
 
 
-def print_transfer_status(current: int, total: int, next_percent: int) -> int:
-    percent = int(current / total * 100)
-    if percent >= next_percent:
-        print(f"\rStatus: {percent}% ({current}/{total} bytes)", end="")
-        return percent + 1
-    return next_percent
+def create_print_transfer_status():
+    last_update = 0
+
+    def print_transfer_status(current: int, total: int):
+        import time
+
+        nonlocal last_update
+
+        now = time.time()
+        percent = current / total * 100
+        if now - last_update > 1 or current == total:
+            print(f"\rStatus: {percent:.2f}% ({current}/{total} bytes)", end="")
+            last_update = now
+
+    return print_transfer_status
+
+
+print_transfer_status = create_print_transfer_status()
 
 
 def format_speed(bytes_transferred: int, elapsed: float) -> str:  # pyright: ignore[reportReturnType]
@@ -66,11 +78,11 @@ def format_speed(bytes_transferred: int, elapsed: float) -> str:  # pyright: ign
         speed /= 1024
 
 
-def print_data_speed(start_time: float, bytes: int, label: str = "Average speed"):
+def print_data_speed(start_time: float, bytes: int):
     import time
 
     elapsed = time.time() - start_time
-    print(f"{label}: {format_speed(bytes, elapsed)}")
+    print(f"Average speed: {format_speed(bytes, elapsed)}")
 
 
 def enable_keepalive(

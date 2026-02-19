@@ -11,7 +11,6 @@ from app.protocol import Command
 BASE_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "server_files"
 )
-os.makedirs(BASE_DIR, exist_ok=True)
 
 PORT = 8080
 BACKLOG = 1
@@ -19,11 +18,7 @@ BACKLOG = 1
 
 class Server:
     def __init__(self):
-        self.session = {
-            "cmd": Command.DOWNLOAD,
-            "filename": "",
-        }
-        self.client_ip = ""
+        self.session = {"cmd": Command.DOWNLOAD, "filename": "", "client_ip": ""}
 
     def start(self, ip: str, port: int):
         server_sock = self.new_socket(ip, port)
@@ -37,15 +32,17 @@ class Server:
 
                 proto.enable_keepalive(self.client_sock)
 
-                if ip != self.client_ip:
+                if ip != self.session["client_ip"]:
+                    if os.path.exists(self.session["filename"] + ".part"):
+                        os.remove(self.session["filename"] + ".part")
                     self.session["filename"] = ""
-                    self.client_ip = ip
+                    self.session["client_ip"] = ip
 
                 try:
                     self.handle_client()
                 except proto.ExitException:
                     print(f"Client {ip}:{port} disconnected")
-                except ConnectionError as e:
+                except (ConnectionError, TimeoutError) as e:
                     print(f"\nConnection with the client {ip}:{port} was lost")
                     print(f"Details: {e}")
                 finally:
@@ -123,11 +120,11 @@ class Server:
         else:
             proto.send_data(self.client_sock, msg)
 
-        print(f"Uploading file '{arg}'...")
+        print(f"Sending file '{arg}'...")
 
         start_time = time.time()
         sent = seek
-        next_percent = proto.print_transfer_status(sent, file_size, 0)
+        proto.print_transfer_status(sent, file_size)
 
         self.session["cmd"] = Command.DOWNLOAD
         self.session["filename"] = real_path
@@ -137,16 +134,15 @@ class Server:
             while chunk := f.read(4096):
                 proto.send_data(self.client_sock, chunk)
                 sent += len(chunk)
-                next_percent = proto.print_transfer_status(
-                    sent, file_size, next_percent
-                )
+                proto.print_transfer_status(sent, file_size)
 
         print("\nDone")
-        proto.print_data_speed(start_time, sent - seek, "Upload speed")
+        proto.print_data_speed(start_time, sent - seek)
 
     def upload(self, arg: str):
-        filename = arg.replace("\\", "/").split("/")[-1]
-        file_path = os.path.join(BASE_DIR, filename)
+        base_filename = arg.replace("\\", "/").split("/")[-1]
+        temp_filename = base_filename + ".part"
+        file_path = os.path.join(BASE_DIR, temp_filename)
 
         raw_file_size = proto.recv_data(self.client_sock)
         file_size = struct.unpack("!Q", raw_file_size)[0]
@@ -157,7 +153,7 @@ class Server:
 
         if (
             self.session["cmd"] == Command.UPLOAD
-            and self.session["filename"] == filename
+            and self.session["filename"] == base_filename
         ):
             try:
                 server_file_size = os.path.getsize(file_path)
@@ -170,28 +166,27 @@ class Server:
         else:
             proto.send_data(self.client_sock, msg)
 
-        print(f"Downloading file '{filename}'...")
+        print(f"Receiving file '{base_filename}'...")
 
         start_time = time.time()
         received = server_file_size
-        next_percent = proto.print_transfer_status(received, file_size, 0)
+        proto.print_transfer_status(received, file_size)
 
         self.session["cmd"] = Command.UPLOAD
-        self.session["filename"] = filename
+        self.session["filename"] = base_filename
 
         with open(file_path, mode) as f:
             while received < file_size:
                 chunk = proto.recv_data(self.client_sock)
                 f.write(chunk)
                 received += len(chunk)
-                next_percent = proto.print_transfer_status(
-                    received, file_size, next_percent
-                )
+                proto.print_transfer_status(received, file_size)
+
+        final_path = file_path.removesuffix(".part")
+        os.replace(file_path, final_path)
 
         print("\nDone")
-        proto.print_data_speed(
-            start_time, received - server_file_size, "Download speed"
-        )
+        proto.print_data_speed(start_time, received - server_file_size)
 
 
 if __name__ == "__main__":
@@ -199,8 +194,10 @@ if __name__ == "__main__":
         print("Usage: python client.py <ip>")
         sys.exit(1)
 
-    server = Server()
+    os.makedirs(BASE_DIR, exist_ok=True)
+
     try:
+        server = Server()
         server.start(sys.argv[1], PORT)
     except OSError as e:
         print(f"Error: {e}")

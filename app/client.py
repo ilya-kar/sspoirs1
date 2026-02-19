@@ -78,7 +78,8 @@ class Client:
             raise proto.ExitException
 
     def download(self, arg: str):
-        filename = arg.replace("\\", "/").split("/")[-1]
+        base_filename = arg.replace("\\", "/").split("/")[-1]
+        temp_filename = base_filename + ".part"
 
         data = proto.recv_data(self.sock)
         status = data[0]
@@ -93,7 +94,7 @@ class Client:
 
         if status == proto.STATUS_APPEND:
             try:
-                client_file_size = os.path.getsize(filename)
+                client_file_size = os.path.getsize(temp_filename)
                 mode = "ab"
             except FileNotFoundError:
                 pass
@@ -104,21 +105,19 @@ class Client:
 
         start_time = time.time()
         received = client_file_size
-        next_percent = proto.print_transfer_status(received, file_size, 0)
+        proto.print_transfer_status(received, file_size)
 
-        with open(filename, mode) as f:
+        with open(temp_filename, mode) as f:
             while received < file_size:
                 chunk = proto.recv_data(self.sock)
                 f.write(chunk)
                 received += len(chunk)
-                next_percent = proto.print_transfer_status(
-                    received, file_size, next_percent
-                )
+                proto.print_transfer_status(received, file_size)
+
+        os.replace(temp_filename, base_filename)
 
         print("\nDone")
-        proto.print_data_speed(
-            start_time, received - client_file_size, "Download speed"
-        )
+        proto.print_data_speed(start_time, received - client_file_size)
 
     def upload(self, arg: str):
         real_path = os.path.realpath(arg)
@@ -144,19 +143,17 @@ class Client:
 
         start_time = time.time()
         sent = seek
-        next_percent = proto.print_transfer_status(sent, file_size, 0)
+        proto.print_transfer_status(sent, file_size)
 
         with open(real_path, "rb") as f:
             f.seek(sent)
             while chunk := f.read(4096):
                 proto.send_data(self.sock, chunk)
                 sent += len(chunk)
-                next_percent = proto.print_transfer_status(
-                    sent, file_size, next_percent
-                )
+                proto.print_transfer_status(sent, file_size)
 
         print("\nDone")
-        proto.print_data_speed(start_time, sent - seek, "Upload speed")
+        proto.print_data_speed(start_time, sent - seek)
 
 
 if __name__ == "__main__":
