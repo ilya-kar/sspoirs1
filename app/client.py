@@ -48,9 +48,8 @@ class Client:
     def handle_input(self):
         while True:
             message = input("> ")
-            if not message:
-                continue
-            self.handle_command(message)
+            if message:
+                self.handle_command(message)
 
     def handle_command(self, message: str):
         parts = message.strip().split(maxsplit=1)
@@ -107,12 +106,18 @@ class Client:
         received = client_file_size
         proto.print_transfer_status(received, file_size)
 
+        last_update = 0
+
         with open(temp_filename, mode) as f:
             while received < file_size:
                 chunk = proto.recv_data(self.sock)
                 f.write(chunk)
                 received += len(chunk)
-                proto.print_transfer_status(received, file_size)
+
+                now = time.time()
+                if now - last_update > 1 or received == file_size:
+                    proto.print_transfer_status(received, file_size)
+                    last_update = now
 
         os.replace(temp_filename, base_filename)
 
@@ -145,12 +150,18 @@ class Client:
         sent = seek
         proto.print_transfer_status(sent, file_size)
 
+        last_update = 0
+
         with open(real_path, "rb") as f:
             f.seek(sent)
             while chunk := f.read(4096):
                 proto.send_data(self.sock, chunk)
                 sent += len(chunk)
-                proto.print_transfer_status(sent, file_size)
+
+                now = time.time()
+                if now - last_update > 1 or sent == file_size:
+                    proto.print_transfer_status(sent, file_size)
+                    last_update = now
 
         print("\nDone")
         proto.print_data_speed(start_time, sent - seek)

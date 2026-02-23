@@ -46,24 +46,9 @@ def send_data(sock: socket.socket, data: bytes):
     sock.sendall(data)
 
 
-def create_print_transfer_status():
-    last_update = 0
-
-    def print_transfer_status(current: int, total: int):
-        import time
-
-        nonlocal last_update
-
-        now = time.time()
-        percent = current / total * 100
-        if now - last_update > 1 or current == total:
-            print(f"\rStatus: {percent:.2f}% ({current}/{total} bytes)", end="")
-            last_update = now
-
-    return print_transfer_status
-
-
-print_transfer_status = create_print_transfer_status()
+def print_transfer_status(current: int, total: int):
+    percent = current / total * 100
+    print(f"\rStatus: {percent:.2f}% ({current}/{total} bytes)", end="")
 
 
 def format_speed(bytes_transferred: int, elapsed: float) -> str:  # pyright: ignore[reportReturnType]

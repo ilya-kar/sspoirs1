@@ -31,6 +31,7 @@ class Server:
                 print(f"Client {ip}:{port} connected")
 
                 proto.enable_keepalive(self.client_sock)
+                self.client_sock.settimeout(30)
 
                 if ip != self.session["client_ip"]:
                     if os.path.exists(self.session["filename"] + ".part"):
@@ -129,12 +130,18 @@ class Server:
         self.session["cmd"] = Command.DOWNLOAD
         self.session["filename"] = real_path
 
+        last_update = 0
+
         with open(real_path, "rb") as f:
             f.seek(seek)
             while chunk := f.read(4096):
                 proto.send_data(self.client_sock, chunk)
                 sent += len(chunk)
-                proto.print_transfer_status(sent, file_size)
+
+                now = time.time()
+                if now - last_update > 1 or sent == file_size:
+                    proto.print_transfer_status(sent, file_size)
+                    last_update = now
 
         print("\nDone")
         proto.print_data_speed(start_time, sent - seek)
@@ -175,12 +182,18 @@ class Server:
         self.session["cmd"] = Command.UPLOAD
         self.session["filename"] = base_filename
 
+        last_update = 0
+
         with open(file_path, mode) as f:
             while received < file_size:
                 chunk = proto.recv_data(self.client_sock)
                 f.write(chunk)
                 received += len(chunk)
-                proto.print_transfer_status(received, file_size)
+
+                now = time.time()
+                if now - last_update > 1 or received == file_size:
+                    proto.print_transfer_status(received, file_size)
+                    last_update = now
 
         final_path = file_path.removesuffix(".part")
         os.replace(file_path, final_path)
