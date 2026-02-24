@@ -31,7 +31,6 @@ class Server:
                 print(f"Client {ip}:{port} connected")
 
                 proto.enable_keepalive(self.client_sock)
-                self.client_sock.settimeout(30)
 
                 if ip != self.session["client_ip"]:
                     if os.path.exists(self.session["filename"] + ".part"):
@@ -65,7 +64,9 @@ class Server:
             message = proto.recv_data(self.client_sock).decode()
             time = datetime.datetime.now().strftime("%H:%M:%S")
             print(f"[{time}] Received message: {message}")
+            self.client_sock.settimeout(30)
             self.handle_command(message)
+            self.client_sock.settimeout(None)
 
     def handle_command(self, message: str):
         parts = message.strip().split(maxsplit=1)
