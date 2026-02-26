@@ -6,3 +6,4 @@ build/
 .vscode/
 server_files/
 *.bin
+*.pdf
