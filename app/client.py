@@ -20,9 +20,8 @@ if __name__ == "__main__":
     ip = sys.argv[2]
     port = int(sys.argv[3])
 
-    client = create_client(protocol, ip, port)
-
     try:
+        client = create_client(protocol, ip, port)
         client.start()
     except OSError as e:
         print(f"Error: {e}")

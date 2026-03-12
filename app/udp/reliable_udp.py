@@ -1,3 +1,4 @@
+import errno
 import math
 import socket
 import struct
@@ -58,7 +59,13 @@ class ReliableUDP:
 
         start_time = time.monotonic()
         while self._sn < temp_sn:
-            self._event_loop_step()
+            try:
+                self._event_loop_step()
+            except OSError as e:
+                if e.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH):
+                    pass
+                else:
+                    raise
             if (
                 self._timeout is not None
                 and time.monotonic() - start_time > self._timeout
@@ -79,7 +86,13 @@ class ReliableUDP:
 
         start_time = time.monotonic()
         while self._an < except_an:
-            self._event_loop_step()
+            try:
+                self._event_loop_step()
+            except OSError as e:
+                if e.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH):
+                    pass
+                else:
+                    raise
             if (
                 self._timeout is not None
                 and time.monotonic() - start_time > self._timeout
@@ -107,7 +120,6 @@ class ReliableUDP:
             self._handle_dgram(dgram)
         except BlockingIOError:
             pass
-
         cur_time = time.monotonic() * 1000
 
         for sn in list(self._send_buffer):

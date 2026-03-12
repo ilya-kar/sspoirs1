@@ -122,7 +122,7 @@ class UDPServer:
 
         with open(real_path, "rb") as f:
             f.seek(seek)
-            while chunk := f.read(4096):
+            while chunk := f.read(6960):
                 self.server_sock.send(chunk)
                 sent += len(chunk)
 
@@ -172,7 +172,7 @@ class UDPServer:
 
         with open(file_path, mode) as f:
             while received < file_size:
-                chunk = self.server_sock.recv()
+                chunk = self.server_sock.recv(min(6960, file_size - received))
                 f.write(chunk)
                 received += len(chunk)
 

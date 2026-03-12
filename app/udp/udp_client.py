@@ -18,9 +18,12 @@ class UDPClient:
 
     def worker(self):
         while not self.stop.is_set():
-            if self.check_event_loop.wait(0.1):
-                self.sock._event_loop_step()
-                time.sleep(0.005)
+            try:
+                if self.check_event_loop.wait(0.1):
+                    self.sock._event_loop_step()
+                    time.sleep(0.005)
+            except OSError:
+                pass
 
     def new_socket(self, ip: str, port: int):
         sock = ReliableUDP()
@@ -108,7 +111,7 @@ class UDPClient:
 
         with open(temp_filename, mode) as f:
             while received < file_size:
-                chunk = self.sock.recv()
+                chunk = self.sock.recv(min(6960, file_size - received))
                 f.write(chunk)
                 received += len(chunk)
 
@@ -152,7 +155,7 @@ class UDPClient:
 
         with open(real_path, "rb") as f:
             f.seek(sent)
-            while chunk := f.read(4096):
+            while chunk := f.read(6960):
                 self.sock.send(chunk)
                 sent += len(chunk)
 

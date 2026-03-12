@@ -26,9 +26,8 @@ if __name__ == "__main__":
     )
     os.makedirs(base_dir, exist_ok=True)
 
-    server = create_server(protocol, ip, base_dir)
-
     try:
+        server = create_server(protocol, ip, base_dir)
         server.start()
     except OSError as e:
         print(f"Error: {e}")
