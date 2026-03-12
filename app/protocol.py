@@ -1,5 +1,6 @@
 import ctypes
 import enum
+import os
 import socket
 import struct
 import sys
@@ -7,6 +8,9 @@ import sys
 STATUS_OK = 0
 STATUS_ERR = 1
 STATUS_APPEND = 2
+
+PORT = 8080
+BACKLOG = 1
 
 
 class Command(str, enum.Enum):
