@@ -23,7 +23,11 @@ class UDPServer:
     def start(self):
         try:
             while True:
-                msg, addr = self.server_sock.recvfrom()
+                try:
+                    msg, addr = self.server_sock.recvfrom()
+                except proto.PeerChangedException:
+                    continue
+
                 ip, port = addr
                 msg = msg.decode()
 
@@ -39,12 +43,15 @@ class UDPServer:
                 try:
                     self.server_sock.set_timeout(30)
                     self.handle_command(msg)
-                    self.server_sock.set_timeout(None)
                 except TimeoutError as e:
                     print(
-                        f"\nError during send or recv data from the client {ip}:{port}"
+                        f"\nError occurred during send or recv data from the client {ip}:{port}"
                     )
                     print(f"Details: {e}")
+                except proto.PeerChangedException:
+                    pass
+                finally:
+                    self.server_sock.set_timeout(None)
         except KeyboardInterrupt:
             print("\nServer is shutting down...")
         finally:
@@ -58,19 +65,15 @@ class UDPServer:
         try:
             cmd = Command(cmd)
         except ValueError:
-            proto.send_data(
-                self.client_sock, f"ERR: Unknown command: {parts[0]}".encode()
-            )
+            self.server_sock.send(f"ERR: Unknown command: {parts[0]}".encode())
             return
 
         if cmd is Command.ECHO:
-            proto.send_data(self.client_sock, arg.encode())
+            answ = arg.encode()
+            self.server_sock.send(answ if len(answ) != 0 else b" ")
         elif cmd is Command.TIME:
             time = datetime.datetime.now().strftime("%H:%M:%S")
-            proto.send_data(self.client_sock, time.encode())
-        elif cmd is Command.EXIT:
-            proto.send_data(self.client_sock, b"Bye!")
-            raise proto.ExitException
+            self.server_sock.send(time.encode())
         elif cmd is Command.DOWNLOAD:
             self.download(arg)
         elif cmd is Command.UPLOAD:
@@ -82,12 +85,12 @@ class UDPServer:
 
         if not real_path.startswith(os.path.realpath(self.base_dir)):
             msg = bytes([proto.STATUS_ERR]) + b"ERR: Access denied"
-            proto.send_data(self.client_sock, msg)
+            self.server_sock.send(msg)
             return
 
         if not os.path.isfile(real_path):
             msg = bytes([proto.STATUS_ERR]) + f"ERR: File '{arg}' not found".encode()
-            proto.send_data(self.client_sock, msg)
+            self.server_sock.send(msg)
             return
 
         seek = 0
@@ -99,11 +102,12 @@ class UDPServer:
             and self.session["filename"] == real_path
         ):
             msg[0] = proto.STATUS_APPEND
-            proto.send_data(self.client_sock, msg)
-            client_raw_file_size = proto.recv_data(self.client_sock)
+
+        self.server_sock.send(msg)
+
+        if msg[0] == proto.STATUS_APPEND:
+            client_raw_file_size = self.server_sock.recv()
             seek = struct.unpack("!Q", client_raw_file_size)[0]
-        else:
-            proto.send_data(self.client_sock, msg)
 
         print(f"Sending file '{arg}'...")
 
@@ -119,7 +123,7 @@ class UDPServer:
         with open(real_path, "rb") as f:
             f.seek(seek)
             while chunk := f.read(4096):
-                proto.send_data(self.client_sock, chunk)
+                self.server_sock.send(chunk)
                 sent += len(chunk)
 
                 now = time.time()
@@ -135,7 +139,7 @@ class UDPServer:
         temp_filename = base_filename + ".part"
         file_path = os.path.join(self.base_dir, temp_filename)
 
-        raw_file_size = proto.recv_data(self.client_sock)
+        raw_file_size = self.server_sock.recv()
         file_size = struct.unpack("!Q", raw_file_size)[0]
 
         mode = "wb"
@@ -153,9 +157,7 @@ class UDPServer:
                 msg[1:] = struct.pack("!Q", server_file_size)
             except FileNotFoundError:
                 pass
-            proto.send_data(self.client_sock, msg)
-        else:
-            proto.send_data(self.client_sock, msg)
+        self.server_sock.send(msg)
 
         print(f"Receiving file '{base_filename}'...")
 
@@ -170,7 +172,7 @@ class UDPServer:
 
         with open(file_path, mode) as f:
             while received < file_size:
-                chunk = proto.recv_data(self.client_sock)
+                chunk = self.server_sock.recv()
                 f.write(chunk)
                 received += len(chunk)
 

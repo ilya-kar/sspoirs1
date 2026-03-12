@@ -1,6 +1,5 @@
 import ctypes
 import enum
-import os
 import socket
 import struct
 import sys
@@ -26,6 +25,10 @@ class ExitException(Exception):
 
 
 class PeerDisconnected(ConnectionError):
+    pass
+
+
+class PeerChangedException(Exception):
     pass
 
 

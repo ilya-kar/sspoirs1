@@ -8,7 +8,7 @@ def create_client(protocol, ip, port) -> TCPClient | UDPClient:
     if protocol == "tcp":
         return TCPClient(ip, port)
     else:
-        pass
+        return UDPClient(ip, port)
 
 
 if __name__ == "__main__":
@@ -23,7 +23,6 @@ if __name__ == "__main__":
     client = create_client(protocol, ip, port)
 
     try:
-        print("Connecting...")
         client.start()
     except OSError as e:
         print(f"Error: {e}")

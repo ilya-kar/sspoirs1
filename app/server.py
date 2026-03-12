@@ -10,7 +10,7 @@ def create_server(protocol, ip, base_dir) -> TCPServer | UDPServer:
     if protocol == "tcp":
         return TCPServer(ip, PORT, base_dir)
     else:
-        pass
+        return UDPServer(ip, PORT, base_dir)
 
 
 if __name__ == "__main__":

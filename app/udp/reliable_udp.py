@@ -3,6 +3,8 @@ import socket
 import struct
 import time
 
+import app.protocol as proto
+
 MAX_WINDOW_SIZE = 5
 RTO = 20
 DELAY_ACK = RTO / 3
@@ -13,9 +15,8 @@ PAYLOAD_SIZE = DGRAM_SIZE - HEADER_SIZE
 
 
 class Datagram:
-    def __init__(self, payload: bytes, numeration: int, send_time: float):
+    def __init__(self, payload: bytes, send_time: float):
         self.payload = payload
-        self.numeration = numeration
         self.send_time = send_time
         self.in_flight = False
 
@@ -31,12 +32,12 @@ class ReliableUDP:
         self._an = 0
         self._send_buffer: dict[int, Datagram] = {}
         self._recv_buffer: dict[int, bytes] = {}
-        self._addr: tuple[str, int] = ("0.0.0.0", 0000)
+        self._addr: tuple[str, int] = ("0.0.0.0", 0)
         self._window_size = MAX_WINDOW_SIZE
 
     def bind(self, addr: tuple[str, int]):
-        self.sock.bind(addr)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(addr)
 
     def set_timeout(self, seconds: float | None):
         self._timeout = seconds
@@ -51,7 +52,7 @@ class ReliableUDP:
         temp_sn = self._sn
         for i in range(n):
             payload = msg[i * PAYLOAD_SIZE : (i + 1) * PAYLOAD_SIZE]
-            dgram = Datagram(payload, temp_sn, 0)
+            dgram = Datagram(payload, 0)
             self._send_buffer[temp_sn] = dgram
             temp_sn += 1
 
@@ -62,15 +63,20 @@ class ReliableUDP:
                 self._timeout is not None
                 and time.monotonic() - start_time > self._timeout
             ):
-                raise socket.timeout
+                raise socket.timeout("timeout")
+            time.sleep(0.005)
 
     def send(self, msg: bytes):
         self.sendto(msg, self._addr)
 
     def recvfrom(self, size: int = PAYLOAD_SIZE) -> tuple[bytes, tuple[str, int]]:
         n = math.ceil(size / PAYLOAD_SIZE)
-
         except_an = self._an + n
+
+        for an in self._recv_buffer:
+            if an < self._an:
+                except_an -= 1
+
         start_time = time.monotonic()
         while self._an < except_an:
             self._event_loop_step()
@@ -78,7 +84,8 @@ class ReliableUDP:
                 self._timeout is not None
                 and time.monotonic() - start_time > self._timeout
             ):
-                raise socket.timeout
+                raise socket.timeout("timeout")
+            time.sleep(0.005)
 
         msg = bytes()
         for i in range(n, 0, -1):
@@ -86,27 +93,32 @@ class ReliableUDP:
 
         return (msg, self._addr)
 
+    def recv(self, size: int = PAYLOAD_SIZE) -> bytes:
+        msg, _ = self.recvfrom(size)
+        return msg
+
     def _event_loop_step(self):
         try:
             dgram, addr = self.sock.recvfrom(DGRAM_SIZE)
             if addr != self._addr:
                 self._addr = addr
                 self.reset()
+                raise proto.PeerChangedException
             self._handle_dgram(dgram)
         except BlockingIOError:
             pass
 
         cur_time = time.monotonic() * 1000
 
-        for key in self._send_buffer:
-            dgram = self._send_buffer[key]
+        for sn in list(self._send_buffer):
+            dgram = self._send_buffer[sn]
 
             if self._window_size > 0:
                 dgram.in_flight = True
                 self._window_size -= 1
 
             if dgram.in_flight and cur_time - dgram.send_time > RTO:
-                header = struct.pack("!II", dgram.numeration, self._an)
+                header = struct.pack("!II", sn, self._an)
                 self.sock.sendto(header + dgram.payload, self._addr)
                 dgram.send_time = cur_time
                 if self._need_to_ack:

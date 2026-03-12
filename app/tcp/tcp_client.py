@@ -23,6 +23,7 @@ class TCPClient:
         self.sock.connect((self.ip, self.port))
 
     def start(self):
+        print("Connecting...")
         while True:
             try:
                 self.connect()
