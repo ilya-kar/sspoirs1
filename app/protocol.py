@@ -7,9 +7,15 @@ import sys
 STATUS_OK = 0
 STATUS_ERR = 1
 STATUS_APPEND = 2
+STATUS_CONN_ID = 3
+STATUS_CONN_NEED_ID = 4
 
 PORT = 8080
-BACKLOG = 1
+BACKLOG = 1024
+
+HEADER = 4
+FORMAT_HEADER = "!I"
+CHUNK = 4096
 
 
 class Command(str, enum.Enum):
@@ -43,13 +49,13 @@ def recv_exact(sock: socket.socket, size: int) -> bytes:
 
 
 def recv_data(sock: socket.socket) -> bytes:
-    raw_len = recv_exact(sock, 4)
-    length = struct.unpack("!I", raw_len)[0]
+    raw_len = recv_exact(sock, HEADER)
+    length = struct.unpack(FORMAT_HEADER, raw_len)[0]
     return recv_exact(sock, length)
 
 
 def send_data(sock: socket.socket, data: bytes):
-    sock.sendall(struct.pack("!I", len(data)))
+    sock.sendall(struct.pack(FORMAT_HEADER, len(data)))
     sock.sendall(data)
 
 
@@ -108,3 +114,25 @@ def enable_keepalive(
         )
     else:
         print("Keepalive: not supported on this platform")
+
+
+def send_some(sock: socket.socket, buffer: bytes) -> bytes:
+    if not buffer:
+        return buffer
+
+    try:
+        sent = sock.send(buffer)
+        return buffer[sent:]
+    except BlockingIOError:
+        return buffer
+
+
+def recv_some(sock: socket.socket, size: int) -> bytes:
+    data = sock.recv(size)
+    if not data:
+        raise PeerDisconnected("Peer closed connection during receiving data")
+    return data
+
+
+def create_data(data: bytes):
+    return struct.pack(FORMAT_HEADER, len(data)) + data
